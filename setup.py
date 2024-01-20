@@ -9,6 +9,8 @@ setup(
     packages=find_packages(),
     install_requires=[
         "Typer[all]",
+        "boto3",
+        "aws",
         # List your project's dependencies here
         # e.g., 'requests', 'flask',
     ],
