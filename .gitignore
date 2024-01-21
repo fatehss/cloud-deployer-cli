@@ -1,3 +1,4 @@
 cloud_deployer.egg-info/
 build/
 test/
+.env

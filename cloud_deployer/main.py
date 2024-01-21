@@ -1,16 +1,26 @@
 import sys
-import argparse
+import typer
 
-#handles argparse for the cli tool
-
-parser = argparse.ArgumentParser(
-    prog='cloud deployer',
-    description='deploys cloud infrastructure',
-    epilog='bottom text'
-)
-parser.add_argument('number', type=int, help='an integer number')
+from cloud_deployer.aws_functions import list_s3
 
 
+app = typer.Typer()
+
+
+@app.command()
 def func():
-    args = parser.parse_args()
-    print(args.number*2)
+    typer.echo(f"Hello World!")
+
+@app.command()
+def bye():
+    typer.echo("bye")
+
+@app.command()
+def s3():
+    try:
+        list_s3()
+    except:
+        print("listing s3 buckets failed")
+
+if __name__ == "__main__":
+    app()

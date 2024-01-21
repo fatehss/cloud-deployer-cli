@@ -16,7 +16,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'cloud-deployer=cloud_deployer.main:func',
+            'cloud-deployer=cloud_deployer.main:app',
         ],
     },
 )
