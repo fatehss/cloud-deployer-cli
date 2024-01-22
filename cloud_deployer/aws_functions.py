@@ -80,12 +80,64 @@ class VPCSetup:
         for sn in public_subnets:
             rt.associate_with_subnet(SubnetId=sn)
         print(f"public subnets: {public_subnets}\nprivate subnet: {private_subnets}")
+
+         #Create EC2 Security Group
+        ec2_sg = self.ec2_resource.create_security_group(
+            GroupName=f"EC2_SG vpc-{str(self.cidr_block)}",
+            Description="EC2 security group allowing inbound SSH traffic and outbound traffic to RDS",
+            VpcId=vpc.id
+        )
+        # Create RDS Security Group
+        rds_sg = self.ec2_resource.create_security_group(
+            GroupName=f"RDS-SG vpc-{str(self.cidr_block)}",
+            Description="Security group allowing inbound MySQL traffic from EC2 instances",
+            VpcId=vpc.id
+        )
+        # Add inbound rule to EC2 Security Group for SSH
+        ec2_sg.authorize_ingress(
+            IpPermissions=[
+                {
+                    'IpProtocol': 'tcp',
+                    'FromPort': 22,
+                    'ToPort': 22,
+                    'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                }
+            ]
+        )
+        # Add outbound rule to EC2 Security Group for MySQL/Aurora to RDS Security Group
+        ec2_sg.authorize_egress(
+            IpPermissions=[
+                {
+                    'IpProtocol': 'tcp',
+                    'FromPort': 3306,
+                    'ToPort': 3306,
+                    'UserIdGroupPairs': [{'GroupId': rds_sg.group_id}]
+                }
+            ]
+        )
+        # Add inbound rule to RDS Security Group for MySQL from EC2 Security Group
+        rds_sg.authorize_ingress(
+            IpPermissions=[
+                {
+                    'IpProtocol': 'tcp',
+                    'FromPort': 3306,
+                    'ToPort': 3306,
+                    'UserIdGroupPairs': [{'GroupId': ec2_sg.group_id}]
+                }
+            ]
+        )
+        print(f"Security groups: {[rds_sg.id, ec2_sg.id]}")
+
+
+        
+
         
 
 def list_s3():
     s3 = boto3.resource('s3')
     for bucket in s3.buckets.all():
         print(bucket.name)
+
 if __name__ == "__main__":
     test_deployment = VPCSetup()
     test_deployment.setup()
