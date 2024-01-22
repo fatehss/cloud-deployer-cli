@@ -64,6 +64,20 @@ class VPCSetup:
                 private_subnets.append(subnet.id)
 
         return public_subnets, private_subnets
+    
+    def create_ec2_instances(self, public_subnets, ec2_sg):
+
+        # TODO: Add script that searches for AMIs instead of hardcoding them
+        instance_list = []
+        #linux 2 ami for 2024 in us-east-1 - ami-0c0b74d29acd0cd97 
+        ami = 'ami-0c0b74d29acd0cd97'
+        for sn in public_subnets:
+            instance = self.ec2_resource.create_instances(
+                ImageId=ami, InstanceType='t2.micro', MaxCount=1, MinCount=1,
+                NetworkInterfaces=[{'SubnetId': sn, 'DeviceIndex': 0, 'AssociatePublicIpAddress': True, 'Groups': [ec2_sg.group_id]}])
+            instance[0].wait_until_exists()
+            instance_list.append(instance[0])
+        return instance_list
 
     def setup(self):
         # Implement the logic to set up VPC, subnets, and security groups
@@ -128,8 +142,11 @@ class VPCSetup:
         )
         print(f"Security groups: {[rds_sg.id, ec2_sg.id]}")
 
+        instances = self.create_ec2_instances(public_subnets, ec2_sg)
+        for i in instances:
+            print(i.id)
 
-        
+
 
         
 
