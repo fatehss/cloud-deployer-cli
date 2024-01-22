@@ -1,5 +1,6 @@
 import boto3
 import ipaddress
+import random
 
 
 
@@ -51,17 +52,30 @@ class VPCSetup:
 
     def create_subnets(self, vpc):
         #this function creates both public and private subnets
+
+        #idea is to ensure creattion of subnets in different azs in the region
+        def get_number_of_azs(region_name):
+            ec2_client = boto3.client('ec2', region_name=region_name)
+            response = ec2_client.describe_availability_zones()
+            azs = response['AvailabilityZones']
+            return len([az for az in azs if az['State'] == 'available'])
+
+        num_azs_available = get_number_of_azs(self.region)  
+        azs = ['a','b','c','d','e','f'] #max of 6 azs per region (as of jan 2024)
+
         public_subnets, private_subnets = [], []
         SUBNET_PREFIX = 24
-        start_network = ipaddress.ip_network(self.cidr_block)
-        
-        for i in range(self.num_public_subnets + self.num_private_subnets):
-            next_cidr = str(ipaddress.ip_network((int(start_network.network_address) + (i + 1) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX)))
-            subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id)
-            if i < self.num_public_subnets:
-                public_subnets.append(subnet.id)
-            else:
-                private_subnets.append(subnet.id)
+        curr_cidr = ipaddress.ip_network(self.cidr_block)
+    
+        for i in range(self.num_public_subnets):
+            next_cidr = str(ipaddress.ip_network((int(curr_cidr.network_address) + (i + 1) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX))) #increment current cidr
+            subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id, AvailabilityZone=self.region+azs[i%num_azs_available])
+            public_subnets.append(subnet.id)
+      
+        for i in range(self.num_private_subnets):
+            next_cidr= str(ipaddress.ip_network((int(curr_cidr.network_address) + (i + 1+self.num_public_subnets) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX))) #increment current cidr
+            subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id, AvailabilityZone=self.region+azs[i%num_azs_available])
+            private_subnets.append(subnet.id)
 
         return public_subnets, private_subnets
     
@@ -77,23 +91,11 @@ class VPCSetup:
                 NetworkInterfaces=[{'SubnetId': sn, 'DeviceIndex': 0, 'AssociatePublicIpAddress': True, 'Groups': [ec2_sg.group_id]}])
             instance[0].wait_until_exists()
             instance_list.append(instance[0])
+            
         return instance_list
 
-    def setup(self):
-        # Implement the logic to set up VPC, subnets, and security groups
-        # ...
+    def create_ec2_rds_security_groups(self,vpc):
 
-        self.cidr_block = self.cidr_correction()
-        vpc = self.create_vpc()
-        print(f"vpc id: {vpc.id}")
-        igw = self.setup_internet_gateway(vpc)
-        print(f"igw id: {igw.id}")
-        rt = self.create_route_table(vpc, igw)
-        print(f"rt id: {rt.id}")
-        public_subnets, private_subnets = self.create_subnets(vpc)
-        for sn in public_subnets:
-            rt.associate_with_subnet(SubnetId=sn)
-        print(f"public subnets: {public_subnets}\nprivate subnet: {private_subnets}")
 
          #Create EC2 Security Group
         ec2_sg = self.ec2_resource.create_security_group(
@@ -140,11 +142,77 @@ class VPCSetup:
                 }
             ]
         )
+
+        return ec2_sg, rds_sg
+
+    def rds_setup(self, private_subnets, rds_sg):
+        suffix = str(random.randint(1,100000))
+        sn_group_name = 'cloud-deployer rds subnet group-'+suffix
+        rds_client = boto3.client('rds', region_name=self.region)
+        rds_client.create_db_subnet_group(
+            DBSubnetGroupName=sn_group_name,
+            DBSubnetGroupDescription='Subnet group for rds instance via cloud-deployer',
+            SubnetIds = private_subnets,
+            )
+
+
+        DB_NAME = 'Cloud-deployer-db-'+suffix
+        DB_USERNAME = "admin"
+        DB_PASSWORD = "MYPASSWORD"
+        try:
+            db_instance = rds_client.create_db_instance(
+                DBInstanceIdentifier=DB_NAME,
+                AllocatedStorage=20,  # Minimum storage in GB for free tier
+                DBInstanceClass='db.t2.micro',  # Free tier eligible instance class
+                Engine='mysql',
+                MasterUsername=DB_USERNAME,
+                MasterUserPassword=DB_PASSWORD,
+                #VPCSecurityGroupIds=[rds_sg.id],
+                DBSubnetGroupName=sn_group_name,
+                MultiAZ=False,
+                StorageType='gp2',
+                BackupRetentionPeriod=7,  # Default retention period
+                Port=3306,
+                PubliclyAccessible=False
+            )
+            return db_instance
+        except Exception as e:
+            print(f"Error creating RDS instance: {e}")
+            return None
+        
+
+
+        
+    def setup(self):
+        # Implement the logic to set up VPC, subnets, and security groups
+        # ...
+
+        self.cidr_block = self.cidr_correction()
+        vpc = self.create_vpc()
+        print(f"vpc id: {vpc.id}")
+        igw = self.setup_internet_gateway(vpc)
+        print(f"igw id: {igw.id}")
+        rt = self.create_route_table(vpc, igw)
+        print(f"rt id: {rt.id}")
+        public_subnets, private_subnets = self.create_subnets(vpc)
+        for sn in public_subnets:
+            rt.associate_with_subnet(SubnetId=sn)
+        print(f"public subnets: {public_subnets}\nprivate subnet: {private_subnets}")
+        ec2_sg, rds_sg = self.create_ec2_rds_security_groups(vpc)  
         print(f"Security groups: {[rds_sg.id, ec2_sg.id]}")
 
+        #create ec2 instances
         instances = self.create_ec2_instances(public_subnets, ec2_sg)
         for i in instances:
-            print(i.id)
+            print(f"ec2 instance id: {i.id}")
+        
+        rds_instance = self.rds_setup(private_subnets, rds_sg)
+        print(f"RDS db instance created")
+
+##TODO:
+        
+# set up automatic connction to ec2 instances from rds 
+
 
 
 
