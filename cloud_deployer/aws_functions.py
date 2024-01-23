@@ -48,6 +48,7 @@ class VPCSetup:
     def create_route_table(self, vpc, igw):
         route_table = vpc.create_route_table()
         route_table.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=igw.id)
+        route_table.create_tags(Tags=[{'Key': 'Name', 'Value': f"Cloud-deployer public vpc rt"}])
         return route_table
 
     def create_subnets(self, vpc):
@@ -70,28 +71,47 @@ class VPCSetup:
         for i in range(self.num_public_subnets):
             next_cidr = str(ipaddress.ip_network((int(curr_cidr.network_address) + (i + 1) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX))) #increment current cidr
             subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id, AvailabilityZone=self.region+azs[i%num_azs_available])
+            subnet.create_tags(Tags=[{'Key': 'Name', 'Value': f"Public-Subnet-{i+1}"}])
             public_subnets.append(subnet.id)
       
         for i in range(self.num_private_subnets):
             next_cidr= str(ipaddress.ip_network((int(curr_cidr.network_address) + (i + 1+self.num_public_subnets) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX))) #increment current cidr
             subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id, AvailabilityZone=self.region+azs[i%num_azs_available])
+            subnet.create_tags(Tags=[{'Key': 'Name', 'Value': f"Private-Subnet-{i+1}"}])
             private_subnets.append(subnet.id)
 
         return public_subnets, private_subnets
     
     def create_ec2_instances(self, public_subnets, ec2_sg):
-
         # TODO: Add script that searches for AMIs instead of hardcoding them
         instance_list = []
         #linux 2 ami for 2024 in us-east-1 - ami-0c0b74d29acd0cd97 
-        ami = 'ami-0c0b74d29acd0cd97'
-        for sn in public_subnets:
+        #amazon linux ami: ami-0a3c3a20c09d6f377
+        ami = 'ami-0a3c3a20c09d6f377'
+        for i, sn in enumerate(public_subnets):
             instance = self.ec2_resource.create_instances(
-                ImageId=ami, InstanceType='t2.micro', MaxCount=1, MinCount=1,
-                NetworkInterfaces=[{'SubnetId': sn, 'DeviceIndex': 0, 'AssociatePublicIpAddress': True, 'Groups': [ec2_sg.group_id]}])
+                ImageId=ami,
+                InstanceType='t2.micro',
+                MaxCount=1,
+                MinCount=1,
+                NetworkInterfaces=[{
+                    'SubnetId': sn,
+                    'DeviceIndex': 0,
+                    'AssociatePublicIpAddress': True,
+                    'Groups': [ec2_sg.group_id]
+                }],
+                TagSpecifications=[
+                    {
+                        'ResourceType': 'instance',
+                        'Tags': [
+                            {'Key': 'Name', 'Value': f'cloud-deployer {1+i}'}
+                        ]
+                    }
+                ]
+            )
             instance[0].wait_until_exists()
             instance_list.append(instance[0])
-            
+
         return instance_list
 
     def create_ec2_rds_security_groups(self,vpc):
@@ -103,12 +123,16 @@ class VPCSetup:
             Description="EC2 security group allowing inbound SSH traffic and outbound traffic to RDS",
             VpcId=vpc.id
         )
+        ec2_sg.create_tags(Tags=[{'Key': 'Name', 'Value': f"EC2-SG-{str(self.cidr_block)}"}])
+
         # Create RDS Security Group
         rds_sg = self.ec2_resource.create_security_group(
             GroupName=f"RDS-SG vpc-{str(self.cidr_block)}",
             Description="Security group allowing inbound MySQL traffic from EC2 instances",
             VpcId=vpc.id
         )
+        rds_sg.create_tags(Tags=[{'Key': 'Name', 'Value': f"RDS-SG-{str(self.cidr_block)}"}])
+
         # Add inbound rule to EC2 Security Group for SSH
         ec2_sg.authorize_ingress(
             IpPermissions=[
@@ -117,17 +141,6 @@ class VPCSetup:
                     'FromPort': 22,
                     'ToPort': 22,
                     'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-                }
-            ]
-        )
-        # Add outbound rule to EC2 Security Group for MySQL/Aurora to RDS Security Group
-        ec2_sg.authorize_egress(
-            IpPermissions=[
-                {
-                    'IpProtocol': 'tcp',
-                    'FromPort': 3306,
-                    'ToPort': 3306,
-                    'UserIdGroupPairs': [{'GroupId': rds_sg.group_id}]
                 }
             ]
         )
@@ -167,13 +180,15 @@ class VPCSetup:
                 Engine='mysql',
                 MasterUsername=DB_USERNAME,
                 MasterUserPassword=DB_PASSWORD,
-                #VPCSecurityGroupIds=[rds_sg.id],
+                VpcSecurityGroupIds=[rds_sg.id],
                 DBSubnetGroupName=sn_group_name,
                 MultiAZ=False,
                 StorageType='gp2',
                 BackupRetentionPeriod=7,  # Default retention period
                 Port=3306,
-                PubliclyAccessible=False
+                PubliclyAccessible=False,
+            Tags=[
+                {'Key': 'Name', 'Value': DB_NAME}]
             )
             return db_instance
         except Exception as e:
@@ -208,12 +223,30 @@ class VPCSetup:
         
         rds_instance = self.rds_setup(private_subnets, rds_sg)
         print(f"RDS db instance created")
+'''
+TODO:
 
-##TODO:
-        
-# set up automatic connction to ec2 instances from rds 
+configure security groups for rds (rds_sg currently is not associated to instance)
+set up automatic connction to ec2 instances from rds 
+
+add the following userdata to the ec2 instances: 
+
+sudo yum install mysql -y  # For Amazon Linux, CentOS, RHEL
+sudo apt-get install mysql-client -y  # For Ubuntu, Debian
+
+'''
+'''
+EC2 User Data + db connection
+
+sudo dnf update -y
+sudo dnf install mariadb105
 
 
+db connection:
+mysql -h [endpoint] -P 3306 -u [username] -p
+
+
+'''
 
 
         
