@@ -1,9 +1,12 @@
 import boto3
 import ipaddress
+
 import random
 
-
-
+USERDATA_SCRIPT = '''#!/bin/bash
+sudo dnf update -y
+sudo dnf install -y mariadb105
+'''
 class VPCSetup:
     def __init__(self, vpc_name = 'cloud-deployer-vpc',region="us-east-1", cidr_block='10.0.0.0/16', num_public_subnets = 2, num_private_subnets=2):
         self.name = vpc_name
@@ -12,6 +15,10 @@ class VPCSetup:
         self.ec2_resource = boto3.resource('ec2', region_name=region)
         self.num_public_subnets = num_public_subnets
         self.num_private_subnets = num_private_subnets
+        self.userdata = USERDATA_SCRIPT
+        self.suffix = ''
+        if vpc_name == 'cloud-deployer-vpc':
+            self.suffix =  '-'+str(random.randint(1,100000)) #this is for distinguishing the vpcs connected
 
     def cidr_correction(self):
         '''
@@ -36,7 +43,7 @@ class VPCSetup:
     def create_vpc(self):
 
         vpc = self.ec2_resource.create_vpc(CidrBlock=self.cidr_block)
-        vpc.create_tags(Tags=[{"Key": "Name", "Value": self.name}])
+        vpc.create_tags(Tags=[{"Key": "Name", "Value": self.name+self.suffix}])
         vpc.wait_until_available()
         return vpc
 
@@ -48,7 +55,7 @@ class VPCSetup:
     def create_route_table(self, vpc, igw):
         route_table = vpc.create_route_table()
         route_table.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=igw.id)
-        route_table.create_tags(Tags=[{'Key': 'Name', 'Value': f"Cloud-deployer public vpc rt"}])
+        route_table.create_tags(Tags=[{'Key': 'Name', 'Value': f"{self.name+self.suffix} public vpc rt"}])
         return route_table
 
     def create_subnets(self, vpc):
@@ -71,13 +78,13 @@ class VPCSetup:
         for i in range(self.num_public_subnets):
             next_cidr = str(ipaddress.ip_network((int(curr_cidr.network_address) + (i + 1) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX))) #increment current cidr
             subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id, AvailabilityZone=self.region+azs[i%num_azs_available])
-            subnet.create_tags(Tags=[{'Key': 'Name', 'Value': f"Public-Subnet-{i+1}"}])
+            subnet.create_tags(Tags=[{'Key': 'Name', 'Value': f"{self.name+self.suffix} Public-Subnet-{i+1}"}])
             public_subnets.append(subnet.id)
       
         for i in range(self.num_private_subnets):
             next_cidr= str(ipaddress.ip_network((int(curr_cidr.network_address) + (i + 1+self.num_public_subnets) * (2 ** (32 - SUBNET_PREFIX)), SUBNET_PREFIX))) #increment current cidr
             subnet = self.ec2_resource.create_subnet(CidrBlock=next_cidr, VpcId=vpc.id, AvailabilityZone=self.region+azs[i%num_azs_available])
-            subnet.create_tags(Tags=[{'Key': 'Name', 'Value': f"Private-Subnet-{i+1}"}])
+            subnet.create_tags(Tags=[{'Key': 'Name', 'Value': f"{self.name+self.suffix} Private-Subnet-{i+1}"}])
             private_subnets.append(subnet.id)
 
         return public_subnets, private_subnets
@@ -94,6 +101,7 @@ class VPCSetup:
                 InstanceType='t2.micro',
                 MaxCount=1,
                 MinCount=1,
+                UserData=self.userdata,
                 NetworkInterfaces=[{
                     'SubnetId': sn,
                     'DeviceIndex': 0,
@@ -104,7 +112,7 @@ class VPCSetup:
                     {
                         'ResourceType': 'instance',
                         'Tags': [
-                            {'Key': 'Name', 'Value': f'cloud-deployer {1+i}'}
+                            {'Key': 'Name', 'Value': f'{self.name+self.suffix}-{1+i}'}
                         ]
                     }
                 ]
@@ -119,19 +127,19 @@ class VPCSetup:
 
          #Create EC2 Security Group
         ec2_sg = self.ec2_resource.create_security_group(
-            GroupName=f"EC2_SG vpc-{str(self.cidr_block)}",
+            GroupName=f"EC2_SG vpc-{self.name+self.suffix}",
             Description="EC2 security group allowing inbound SSH traffic and outbound traffic to RDS",
             VpcId=vpc.id
         )
-        ec2_sg.create_tags(Tags=[{'Key': 'Name', 'Value': f"EC2-SG-{str(self.cidr_block)}"}])
+        ec2_sg.create_tags(Tags=[{'Key': 'Name', 'Value': f"EC2-SG-{self.name+self.suffix}"}])
 
         # Create RDS Security Group
         rds_sg = self.ec2_resource.create_security_group(
-            GroupName=f"RDS-SG vpc-{str(self.cidr_block)}",
+            GroupName=f"RDS-SG vpc-{self.name+self.suffix}",
             Description="Security group allowing inbound MySQL traffic from EC2 instances",
             VpcId=vpc.id
         )
-        rds_sg.create_tags(Tags=[{'Key': 'Name', 'Value': f"RDS-SG-{str(self.cidr_block)}"}])
+        rds_sg.create_tags(Tags=[{'Key': 'Name', 'Value': f"RDS-SG-{self.name+self.suffix}"}])
 
         # Add inbound rule to EC2 Security Group for SSH
         ec2_sg.authorize_ingress(
@@ -159,8 +167,7 @@ class VPCSetup:
         return ec2_sg, rds_sg
 
     def rds_setup(self, private_subnets, rds_sg):
-        suffix = str(random.randint(1,100000))
-        sn_group_name = 'cloud-deployer rds subnet group-'+suffix
+        sn_group_name = '{self.name+self.suffix} rds subnet group-'
         rds_client = boto3.client('rds', region_name=self.region)
         rds_client.create_db_subnet_group(
             DBSubnetGroupName=sn_group_name,
@@ -169,7 +176,7 @@ class VPCSetup:
             )
 
 
-        DB_NAME = 'Cloud-deployer-db-'+suffix
+        DB_NAME = f'{self.name+self.suffix}-db-'
         DB_USERNAME = "admin"
         DB_PASSWORD = "MYPASSWORD"
         try:
@@ -221,8 +228,8 @@ class VPCSetup:
         for i in instances:
             print(f"ec2 instance id: {i.id}")
         
-        rds_instance = self.rds_setup(private_subnets, rds_sg)
-        print(f"RDS db instance created")
+        # rds_instance = self.rds_setup(private_subnets, rds_sg)
+        # print(f"RDS db instance created")
 '''
 TODO:
 
