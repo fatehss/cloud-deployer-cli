@@ -8,13 +8,14 @@ sudo dnf update -y
 sudo dnf install -y mariadb105
 '''
 class VPCSetup:
-    def __init__(self, vpc_name = 'cloud-deployer-vpc',region="us-east-1", cidr_block='10.0.0.0/16', num_public_subnets = 2, num_private_subnets=2):
+    def __init__(self, vpc_name = 'cloud-deployer-vpc',region="us-east-1", cidr_block='10.0.0.0/16', num_public_subnets = 2, num_private_subnets=2, include_load_balancer=False):
         self.name = vpc_name
         self.region = region
         self.cidr_block= cidr_block
         self.ec2_resource = boto3.resource('ec2', region_name=region)
         self.num_public_subnets = num_public_subnets
         self.num_private_subnets = num_private_subnets
+        self.load_balancer = include_load_balancer
         self.userdata = USERDATA_SCRIPT
         self.suffix = ''
         if vpc_name == 'cloud-deployer-vpc':
@@ -202,7 +203,33 @@ class VPCSetup:
             print(f"Error creating RDS instance: {e}")
             return None
         
+#     def create_load_balancer(self, subnets):
+#         autoscaling = boto3.client('autoscaling')
 
+#         # Create launch configuration
+#         autoscaling.create_launch_configuration(
+#             LaunchConfigurationName='my-launch-configuration',
+#             ImageId='ami-xxxxxx',  # replace with your chosen AMI ID
+#             InstanceType='t2.micro',  # replace with your chosen instance type
+#             SecurityGroups=[
+#                 'sg-xxxxxx',  # replace with your security group ID
+#             ],
+#             IamInstanceProfile='my-iam-role'  # replace with your IAM role if necessary
+#         )
+
+#         # Create auto scaling group
+#         autoscaling.create_auto_scaling_group(
+#             AutoScalingGroupName='my-auto-scaling-group',
+#             LaunchConfigurationName='my-launch-configuration',
+#             MinSize=1,
+#             MaxSize=3,
+#             DesiredCapacity=2,
+#             VPCZoneIdentifier='subnet-xxxxxx,subnet-yyyyyy',  # replace with your subnet IDs
+#             TargetGroupARNs=[target_group_arn],
+#             HealthCheckType='ELB',
+#             HealthCheckGracePeriod=300
+#         )
+# `
 
         
     def setup(self):
@@ -228,8 +255,8 @@ class VPCSetup:
         for i in instances:
             print(f"ec2 instance id: {i.id}")
         
-        # rds_instance = self.rds_setup(private_subnets, rds_sg)
-        # print(f"RDS db instance created")
+        rds_instance = self.rds_setup(private_subnets, rds_sg)
+        print(f"RDS db instance created")
 '''
 TODO:
 
