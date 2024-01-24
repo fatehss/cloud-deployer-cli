@@ -168,7 +168,7 @@ class VPCSetup:
         return ec2_sg, rds_sg
 
     def rds_setup(self, private_subnets, rds_sg):
-        sn_group_name = '{self.name+self.suffix} rds subnet group-'
+        sn_group_name = f'{self.name+self.suffix} rds subnet group-'
         rds_client = boto3.client('rds', region_name=self.region)
         rds_client.create_db_subnet_group(
             DBSubnetGroupName=sn_group_name,
@@ -177,7 +177,7 @@ class VPCSetup:
             )
 
 
-        DB_NAME = f'{self.name+self.suffix}-db-'
+        DB_NAME = f'cloud-deployer-n{self.suffix}-db'
         DB_USERNAME = "admin"
         DB_PASSWORD = "MYPASSWORD"
         try:
@@ -254,7 +254,7 @@ class VPCSetup:
         instances = self.create_ec2_instances(public_subnets, ec2_sg)
         for i in instances:
             print(f"ec2 instance id: {i.id}")
-        
+        # create rds instance
         rds_instance = self.rds_setup(private_subnets, rds_sg)
         print(f"RDS db instance created")
 '''
