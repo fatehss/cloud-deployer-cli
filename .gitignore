@@ -2,3 +2,6 @@ cloud_deployer.egg-info/
 build/
 test/
 .env
+.vscode/
+cloud_deployer/__pycache__/
+cloud_deployer/test.py

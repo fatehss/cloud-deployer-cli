@@ -235,7 +235,7 @@ class VPCSetup:
     def setup(self):
         # Implement the logic to set up VPC, subnets, and security groups
         # ...
-
+        print(f"Creating VPC {self.name+self.suffix}")
         self.cidr_block = self.cidr_correction()
         vpc = self.create_vpc()
         print(f"vpc id: {vpc.id}")

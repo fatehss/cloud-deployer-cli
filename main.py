@@ -1,9 +1,10 @@
-import os
 import os.path
 import typer
 import ipaddress
+import boto3
 
 from cloud_deployer.aws_functions import USERDATA_SCRIPT, VPCSetup
+from cloud_deployer.vpc_cleanup import delete_infrastructure
 
 
 app = typer.Typer()
@@ -34,7 +35,38 @@ def setup():
     except Exception as e:
         print(e)
 
-        
+@app.command()
+def cleanup():
+    def get_vpc_name(tags):
+        """Extract the name from VPC tags."""
+        if tags is None:
+            return "No Name"
+        for tag in tags:
+            if tag['Key'] == 'Name':
+                return tag['Value']
+        return "No Name"
+
+    ec2_client = boto3.client('ec2')
+
+    # Describe all VPCs
+    response = ec2_client.describe_vpcs()
+    vpcs = response['Vpcs']
+
+    # Filter out the default VPCs and get their names
+    non_default_vpcs = []
+    print("Current VPCs in account:\n")
+    for vpc in vpcs:
+        if not vpc['IsDefault']:
+            vpc_name = get_vpc_name(vpc.get('Tags', []))
+            print(f"VPC ID: {vpc['VpcId']} - Name: {vpc_name} - State: {vpc['State']} - CIDR: {vpc['CidrBlock']}")
+    print('\n')
+
+    available_vpcs =  [vpc['VpcId'] for vpc in vpcs]
+    vpc_id = typer.prompt("Enter VPC ID of VPC to be removed:")
+    if vpc_id not in available_vpcs:
+        print("Invalid VPC ID")
+    else:
+        delete_infrastructure(vpc_id)
 
 @app.command()
 def bye():
