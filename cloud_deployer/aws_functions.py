@@ -12,7 +12,6 @@ class VPCSetup:
         self.name = vpc_name
         self.region = region
         self.cidr_block= cidr_block
-        self.ec2_resource = boto3.resource('ec2', region_name=region)
         self.num_public_subnets = num_public_subnets
         self.num_private_subnets = num_private_subnets
         self.load_balancer = include_load_balancer
@@ -21,12 +20,13 @@ class VPCSetup:
         if vpc_name == 'cloud-deployer-vpc':
             self.suffix =  '-'+str(random.randint(1,100000)) #this is for distinguishing the vpcs connected
 
+        self.ec2_resource = boto3.resource('ec2', region_name=region)
+        self.ec2_client = boto3.client('ec2')
     def cidr_correction(self):
         '''
         Function to find the next closest cidr block to the one provided
         '''
-        client = boto3.client('ec2',region_name=self.region) #check vpcs
-        response = client.describe_vpcs()
+        response = self.ec2_client.describe_vpcs()
         if not response:
             print("failed to connect to aws cli")
             exit(1)
@@ -64,8 +64,7 @@ class VPCSetup:
 
         #idea is to ensure creattion of subnets in different azs in the region
         def get_number_of_azs(region_name):
-            ec2_client = boto3.client('ec2', region_name=region_name)
-            response = ec2_client.describe_availability_zones()
+            response = self.ec2_client.describe_availability_zones()
             azs = response['AvailabilityZones']
             return len([az for az in azs if az['State'] == 'available'])
 
@@ -95,6 +94,17 @@ class VPCSetup:
         instance_list = []
         #linux 2 ami for 2024 in us-east-1 - ami-0c0b74d29acd0cd97 
         #amazon linux ami: ami-0a3c3a20c09d6f377
+
+        #creating the key pairs:
+        
+        KeyName=self.name+self.suffix + '-key'
+        key_pair = self.ec2_client.create_key_pair(KeyName=KeyName, KeyType='ed25519')
+        private_key = key_pair['KeyMaterial']
+        # Save the private key to a file
+        with open(f"{KeyName}.pem", "w") as key_file:
+            key_file.write(private_key)
+        print(f"\nEC2 instance SSH key-pair stored in {KeyName}.pem\n")
+
         ami = 'ami-0a3c3a20c09d6f377'
         for i, sn in enumerate(public_subnets):
             instance = self.ec2_resource.create_instances(
@@ -103,6 +113,7 @@ class VPCSetup:
                 MaxCount=1,
                 MinCount=1,
                 UserData=self.userdata,
+                KeyName=KeyName,
                 NetworkInterfaces=[{
                     'SubnetId': sn,
                     'DeviceIndex': 0,
@@ -255,8 +266,8 @@ class VPCSetup:
         for i in instances:
             print(f"ec2 instance id: {i.id}")
         # create rds instance
-        rds_instance = self.rds_setup(private_subnets, rds_sg)
-        print(f"RDS db instance created")
+        # rds_instance = self.rds_setup(private_subnets, rds_sg)
+        # print(f"RDS db instance created")
 '''
 TODO:
 

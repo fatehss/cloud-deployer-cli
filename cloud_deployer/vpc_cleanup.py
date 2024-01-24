@@ -190,7 +190,7 @@ def delete_infrastructure(vpc_id):
     print("\nGreat success!")
    
 #testing purposes:
-vpc_id = "vpc-0cc4eb39e0b6673c5"
+vpc_id = "vpc-00534f7fc0c37be11"
 if __name__ == '__main__':
    delete_infrastructure(vpc_id)
 
