@@ -4,7 +4,7 @@ You need python3 installed for this to work.
 
 Setup steps:
 
-1. Run "pip install ." in the directory containing this file
+1. Run "pip install ." in the directory containing this package
 2. Follow [these instructions](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html) to setup aws cli 
 
 The CLI has two command:
