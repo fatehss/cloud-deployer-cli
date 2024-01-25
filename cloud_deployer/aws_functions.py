@@ -218,9 +218,9 @@ class VPCSetup:
         alb_client = boto3.client('elbv2')
 
         try:
-            GroupName = f"ALB"
+            ALBName = f"ALB"+self.suffix
             alb_sg = self.ec2_resource.create_security_group(
-                GroupName=GroupName+"-SG",
+                GroupName=f"ALB-SG-vpc-{self.name+self.suffix}",
                 Description="Security group for application load balancer allowing http(s) traffic",
                 VpcId=vpc.id
             )
@@ -228,7 +228,7 @@ class VPCSetup:
             # Tag the security group after creation
             self.ec2_resource.create_tags(
                 Resources=[alb_sg.group_id],
-                Tags=[{'Key': 'Name', 'Value': GroupName + "-SG"}]
+                Tags=[{'Key': 'Name', 'Value': ALBName + "-SG"}]
             )
             alb_sg.authorize_ingress(
                 IpPermissions=[
@@ -263,7 +263,6 @@ class VPCSetup:
                 HealthCheckPath='/',
                 TargetType='instance'
             )
-
             def are_instances_running(ec2_instances):
                 instance_ids = [val.id for val in ec2_instances]
                 response = self.ec2_client.describe_instances(InstanceIds=instance_ids)
@@ -288,11 +287,11 @@ class VPCSetup:
             )
             #create alb and create listener for target groups
             application_load_balancer = alb_client.create_load_balancer(
-                Name=GroupName,
+                Name=ALBName,
                 Type='application',
                 Subnets=subnets,
                 SecurityGroups=[alb_sg.group_id],
-                Tags=[{'Key': 'Name', 'Value': GroupName}]
+                Tags=[{'Key': 'Name', 'Value': ALBName}]
             )
             alb_arn = application_load_balancer['LoadBalancers'][0]['LoadBalancerArn']
             alb_client.create_listener(
@@ -304,7 +303,7 @@ class VPCSetup:
                     'TargetGroupArn': target_group['TargetGroups'][0]['TargetGroupArn']
                 }]
             )
-            return application_load_balancer.id, alb_sg.group_id
+            return alb_sg.group_id
         except Exception as e:
             print(f"Error creating ALB: {e}")
 
