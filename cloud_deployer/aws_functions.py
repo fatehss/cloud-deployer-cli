@@ -1,6 +1,6 @@
 import boto3
 import ipaddress
-
+import time
 import random
 
 USERDATA_SCRIPT = '''#!/bin/bash
@@ -214,33 +214,102 @@ class VPCSetup:
             print(f"Error creating RDS instance: {e}")
             return None
         
-#     def create_load_balancer(self, subnets):
-#         autoscaling = boto3.client('autoscaling')
+    def create_load_balancer(self, vpc, subnets, ec2_instances, ec2_sg):
+        alb_client = boto3.client('elbv2')
 
-#         # Create launch configuration
-#         autoscaling.create_launch_configuration(
-#             LaunchConfigurationName='my-launch-configuration',
-#             ImageId='ami-xxxxxx',  # replace with your chosen AMI ID
-#             InstanceType='t2.micro',  # replace with your chosen instance type
-#             SecurityGroups=[
-#                 'sg-xxxxxx',  # replace with your security group ID
-#             ],
-#             IamInstanceProfile='my-iam-role'  # replace with your IAM role if necessary
-#         )
+        try:
+            GroupName = f"ALB"
+            alb_sg = self.ec2_resource.create_security_group(
+                GroupName=GroupName+"-SG",
+                Description="Security group for application load balancer allowing http(s) traffic",
+                VpcId=vpc.id
+            )
 
-#         # Create auto scaling group
-#         autoscaling.create_auto_scaling_group(
-#             AutoScalingGroupName='my-auto-scaling-group',
-#             LaunchConfigurationName='my-launch-configuration',
-#             MinSize=1,
-#             MaxSize=3,
-#             DesiredCapacity=2,
-#             VPCZoneIdentifier='subnet-xxxxxx,subnet-yyyyyy',  # replace with your subnet IDs
-#             TargetGroupARNs=[target_group_arn],
-#             HealthCheckType='ELB',
-#             HealthCheckGracePeriod=300
-#         )
-# `
+            # Tag the security group after creation
+            self.ec2_resource.create_tags(
+                Resources=[alb_sg.group_id],
+                Tags=[{'Key': 'Name', 'Value': GroupName + "-SG"}]
+            )
+            alb_sg.authorize_ingress(
+                IpPermissions=[
+                    {
+                        'IpProtocol': 'tcp',
+                        'FromPort': 80,
+                        'ToPort': 80,
+                        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                    }
+                ]
+            )
+            ec2_sg.authorize_ingress(
+                IpPermissions=[
+                    {
+                        'IpProtocol': 'tcp',
+                        'FromPort': 80,
+                        'ToPort': 80,
+                        'UserIdGroupPairs': [{'GroupId': alb_sg.group_id}]
+                    }
+
+                ]
+            )
+
+            #create the target group
+            target_group = alb_client.create_target_group(
+                Name="TargetGroup"+self.suffix,
+                Protocol='HTTP',
+                Port=80,
+                VpcId=vpc.id,
+                HealthCheckProtocol='HTTP',
+                HealthCheckPort='80',
+                HealthCheckPath='/',
+                TargetType='instance'
+            )
+
+            def are_instances_running(ec2_instances):
+                instance_ids = [val.id for val in ec2_instances]
+                response = self.ec2_client.describe_instances(InstanceIds=instance_ids)
+                for reservation in response['Reservations']:
+                    for instance in reservation['Instances']:
+                        if instance['State']['Name'] != 'running':
+                            return False
+                return True
+            print("Waiting for ec2 instances to start running")
+            time.sleep(2)
+            while not are_instances_running(ec2_instances): #need to wait for instances to be in a running state before continuing
+                print('...')
+                time.sleep(5)
+            print("All instances running")
+
+
+            # Register EC2 instances with the target group
+            targets = [{'Id': instance.id} for instance in ec2_instances]
+            alb_client.register_targets(
+                TargetGroupArn=target_group['TargetGroups'][0]['TargetGroupArn'],
+                Targets=targets
+            )
+            #create alb and create listener for target groups
+            application_load_balancer = alb_client.create_load_balancer(
+                Name=GroupName,
+                Type='application',
+                Subnets=subnets,
+                SecurityGroups=[alb_sg.group_id],
+                Tags=[{'Key': 'Name', 'Value': GroupName}]
+            )
+            alb_arn = application_load_balancer['LoadBalancers'][0]['LoadBalancerArn']
+            alb_client.create_listener(
+                LoadBalancerArn=alb_arn,
+                Protocol='HTTP',
+                Port=80,
+                DefaultActions=[{
+                    'Type': 'forward',
+                    'TargetGroupArn': target_group['TargetGroups'][0]['TargetGroupArn']
+                }]
+            )
+            return application_load_balancer.id, alb_sg.group_id
+        except Exception as e:
+            print(f"Error creating ALB: {e}")
+
+
+
 
         
     def setup(self):
@@ -262,10 +331,11 @@ class VPCSetup:
         print(f"Security groups: {[rds_sg.id, ec2_sg.id]}")
 
         #create ec2 instances
-        instances = self.create_ec2_instances(public_subnets, ec2_sg)
-        for i in instances:
+        ec2_instances = self.create_ec2_instances(public_subnets, ec2_sg)
+        for i in ec2_instances:
             print(f"ec2 instance id: {i.id}")
         # create rds instance
+        print(f"Application load balancer and security group ids: {self.create_load_balancer(vpc, public_subnets, ec2_instances, ec2_sg)}")
         # rds_instance = self.rds_setup(private_subnets, rds_sg)
         # print(f"RDS db instance created")
 '''
