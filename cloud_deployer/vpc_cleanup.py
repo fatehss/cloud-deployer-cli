@@ -154,7 +154,7 @@ def wait_for_ec2_termination(ec2_resource, vpc_id):
 
 def wait_for_rds_deletion(rds_client, vpc_id):
     rds_instances = rds_client.describe_db_instances()['DBInstances']
-    
+    rds_instances = [instance for instance in rds_instances if instance['DBSubnetGroup']['VpcId'] == vpc_id] #filter by vpc id
     for db_instance in rds_instances:
         if db_instance['DBSubnetGroup']['VpcId'] == vpc_id:
             rds_client.delete_db_instance(

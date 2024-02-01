@@ -8,18 +8,23 @@ sudo dnf update -y
 sudo dnf install -y mariadb105
 '''
 class VPCSetup:
-    def __init__(self, vpc_name = 'cloud-deployer-vpc',region="us-east-1", cidr_block='10.0.0.0/16', num_public_subnets = 2, num_private_subnets=2, include_load_balancer=False):
+    def __init__(self, vpc_name,region, cidr_block, num_public_subnets, num_private_subnets, include_load_balancer, create_rds, db_admin_username, db_password):
         self.name = vpc_name
         self.region = region
         self.cidr_block= cidr_block
         self.num_public_subnets = num_public_subnets
         self.num_private_subnets = num_private_subnets
         self.load_balancer = include_load_balancer
+
+        self.create_rds = create_rds
+        self.db_admin_username =db_admin_username
+        self.db_password = db_password
+        
         self.userdata = USERDATA_SCRIPT
         self.suffix = ''
         if vpc_name == 'cloud-deployer-vpc':
             self.suffix =  '-'+str(random.randint(1,100000)) #this is for distinguishing the vpcs connected
-
+            
         self.ec2_resource = boto3.resource('ec2', region_name=region)
         self.ec2_client = boto3.client('ec2')
     def cidr_correction(self):
@@ -40,7 +45,7 @@ class VPCSetup:
             start_network = ipaddress.ip_network((int(start_network.network_address) + start_network.num_addresses, cidr_mask))
 
         return str(start_network)
-
+    
     def create_vpc(self):
 
         vpc = self.ec2_resource.create_vpc(CidrBlock=self.cidr_block)
@@ -189,8 +194,8 @@ class VPCSetup:
 
 
         DB_NAME = f'cloud-deployer-n{self.suffix}-db'
-        DB_USERNAME = "admin"
-        DB_PASSWORD = "MYPASSWORD"
+        DB_USERNAME = self.db_admin_username
+        DB_PASSWORD = self.db_password
         try:
             db_instance = rds_client.create_db_instance(
                 DBInstanceIdentifier=DB_NAME,
@@ -334,41 +339,12 @@ class VPCSetup:
         for i in ec2_instances:
             print(f"ec2 instance id: {i.id}")
         # create rds instance
-        print(f"Application load balancer and security group ids: {self.create_load_balancer(vpc, public_subnets, ec2_instances, ec2_sg)}")
-        # rds_instance = self.rds_setup(private_subnets, rds_sg)
-        # print(f"RDS db instance created")
-'''
-TODO:
+        if self.load_balancer:
+            print(f"Application load balancer and security group ids: {self.create_load_balancer(vpc, public_subnets, ec2_instances, ec2_sg)}")
+        if self.create_rds:
+            rds_instance = self.rds_setup(private_subnets, rds_sg)
+            print(f"RDS db instance created")
 
-configure security groups for rds (rds_sg currently is not associated to instance)
-set up automatic connction to ec2 instances from rds 
-
-add the following userdata to the ec2 instances: 
-
-sudo yum install mysql -y  # For Amazon Linux, CentOS, RHEL
-sudo apt-get install mysql-client -y  # For Ubuntu, Debian
-
-'''
-'''
-EC2 User Data + db connection
-
-sudo dnf update -y
-sudo dnf install mariadb105
-
-
-db connection:
-mysql -h [endpoint] -P 3306 -u [username] -p
-
-
-'''
-
-
-        
-
-def list_s3():
-    s3 = boto3.resource('s3')
-    for bucket in s3.buckets.all():
-        print(bucket.name)
 
 if __name__ == "__main__":
     test_deployment = VPCSetup()

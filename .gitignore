@@ -6,3 +6,4 @@ test/
 cloud_deployer/__pycache__/
 cloud_deployer/test.py
 cloud_deployer/*.pem
+*.pem

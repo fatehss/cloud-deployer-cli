@@ -21,19 +21,28 @@ def subnet_limits(num: int):
 
 @app.command()
 def setup():
-    vpc_name = typer.prompt("VPC name", default="cloud-deployer")
+    vpc_name = typer.prompt("VPC name", default="cloud-deployer-vpc")
     region = typer.prompt("Region", default="us-east-1")
     cidr_block = typer.prompt("CIDR block", default="10.0.0.0/16", value_proc=validate_cidr_block)
     num_public_subnets = typer.prompt("Number of public subnets", type=int, default=2)
-    num_private_subnets = typer.prompt("Number of private subnets for RDS", default=2)
+    include_load_balancer = typer.confirm("Include load balancer?", default=False)
+    create_rds = typer.confirm("Create Database?", default=False)
 
-
+    num_private_subnets = typer.prompt("Number of private subnets for RDS", type=int, default=2)
+    db_admin_username = "admin"
+    db_password = "mypassword"
+    
+    if create_rds:
+        db_admin_username = typer.prompt("Database Admin Username", default="admin")
+        db_password = typer.prompt("Database Admin Password", hide_input=True)
+ 
     try:
         print("called function")
-        vpc = VPCSetup(vpc_name, region, cidr_block, num_public_subnets, num_private_subnets)
+        vpc = VPCSetup(vpc_name=vpc_name, region=region, cidr_block=cidr_block, num_public_subnets=num_public_subnets, num_private_subnets=num_private_subnets, create_rds=create_rds, db_admin_username=db_admin_username, db_password=db_password, include_load_balancer=include_load_balancer)
         vpc.setup()
     except Exception as e:
         print(e)
+        
 
 @app.command()
 def cleanup():
