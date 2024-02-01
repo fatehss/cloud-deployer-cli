@@ -8,14 +8,16 @@ sudo dnf update -y
 sudo dnf install -y mariadb105
 '''
 class VPCSetup:
-    def __init__(self, vpc_name,region, cidr_block, num_public_subnets, num_private_subnets, include_load_balancer, create_rds, db_admin_username, db_password):
+    def __init__(self, vpc_name,region, cidr_block, num_public_subnets, ec2_ami, num_private_subnets, include_load_balancer, create_rds, db_admin_username, db_password):
         self.name = vpc_name
         self.region = region
         self.cidr_block= cidr_block
+
+        self.ec2_ami = ec2_ami
         self.num_public_subnets = num_public_subnets
         self.num_private_subnets = num_private_subnets
         self.load_balancer = include_load_balancer
-
+        
         self.create_rds = create_rds
         self.db_admin_username =db_admin_username
         self.db_password = db_password
@@ -99,7 +101,7 @@ class VPCSetup:
         instance_list = []
         #linux 2 ami for 2024 in us-east-1 - ami-0c0b74d29acd0cd97 
         #amazon linux ami: ami-0a3c3a20c09d6f377
-
+        
         #creating the key pairs:
         
         KeyName=self.name+self.suffix + '-key'
@@ -110,10 +112,9 @@ class VPCSetup:
             key_file.write(private_key)
         print(f"\nEC2 instance SSH key-pair stored in {KeyName}.pem\n")
 
-        ami = 'ami-0a3c3a20c09d6f377'
         for i, sn in enumerate(public_subnets):
             instance = self.ec2_resource.create_instances(
-                ImageId=ami,
+                ImageId=self.ec2_ami, #use ami parameter
                 InstanceType='t2.micro',
                 MaxCount=1,
                 MinCount=1,
